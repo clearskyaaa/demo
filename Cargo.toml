@@ -1,0 +1,26 @@
+[package]
+name = "demo"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+windows={version="0.58.0",features = [
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_GdiPlus"
+]}
+thiserror="1.0.65"
+anyhow = "1.0"
+tokio = { version = "1.41.0", features = ["full"] }
+tokio-tungstenite = { version = "0.24.0",features = ["native-tls"] } 
+futures-util = "0.3"
+futures-channel = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+lazy_static = "1.5"
+url = "2.3.1"
+tokio-socks = "0.5.1"
+base64 = "0.20.0"
+clap = { version = "4.5.20", features = ["derive"] }
+

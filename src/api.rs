@@ -120,11 +120,12 @@ fn send_message_to_ui(hwnd: usize, message: ApiMessage) {
     }
 }
 
-async fn get_ws_stream<T>(
+use tokio::time::{self, Duration};
+async fn ws_handle<T>(
     ws_stream: T,
     trade_pair_arc: Arc<Mutex<TradePair>>,
     hwnd: usize,
-    tx_arc: Arc<Mutex<UnboundedSender<Message>>>,
+    tx: UnboundedSender<Message>,
     rx: &mut UnboundedReceiver<Message>,
 ) where
     T: Stream<
@@ -137,34 +138,57 @@ async fn get_ws_stream<T>(
 {
     {
         let trade_pair = trade_pair_arc.lock().unwrap();
-        subscribe(&trade_pair, Arc::clone(&tx_arc));
+        subscribe(&trade_pair, tx.clone());
     }
-    let (write, read) = ws_stream.split();
+    let (write, mut read) = ws_stream.split();
     let send_to_ws = rx.map(Ok).forward(write);
-    let receiv_from_ws = {
-        read.for_each(|message| async {
-            let data = message.unwrap();
-            let tx = tx_arc.lock().unwrap();
-            match data {
-                Message::Text(str_data) => {
+    let timeout_duration = Duration::from_secs(10); 
+    let receiv_from_ws = async{
+        loop{
+            let timeout_result = time::timeout(timeout_duration, read.next()).await;
+            if timeout_result.is_err(){
+                println!("连接超时");
+                let test_msg = Message::Text("haha".to_string());
+                    tx.unbounded_send(test_msg).unwrap();
+                continue;
+            }
+            let result = timeout_result.unwrap();
+            if result.is_none(){
+                break;
+            }
+            let message =result.unwrap();
+            match message {
+                Ok(Message::Text(str_data)) => {
+                    println!("str_data:{}", str_data);
                     let price = serde_json::from_str::<Price>(&str_data);
                     if !price.is_ok() {
-                        let api_result = serde_json::from_str::<ApiResult>(&str_data);
-                        if !api_result.is_ok() {
-                            let _ = tx.unbounded_send(Message::Close(None));
-                        }
-                        return;
+                        // let api_result = serde_json::from_str::<ApiResult>(&str_data);
+                        // if !api_result.is_ok() {
+                        //     break;
+                        // }
+                        // continue;
+                        continue;
                     }
                     let price = price.unwrap();
                     send_message_to_ui(hwnd, ApiMessage::Price(price));
                 }
-                Message::Ping(payload) => {
-                    let pong_msg = Message::Pong(payload);
+                Ok(Message::Ping(payload)) => {
+                    println!("ping");
+                    let pong_msg = Message::Pong(payload.clone());
                     tx.unbounded_send(pong_msg).unwrap();
                 }
-                _ => {}
+                Ok(Message::Close(_)) => {
+                    println!("close");
+                }
+                Err(err) => {
+                    println!("ws message is err:{:?}", err);
+                    break;
+                }
+                _ => {
+                    println!("other ws message");
+                }
             }
-        })
+        }
     };
     pin_mut!(send_to_ws, receiv_from_ws);
     future::select(send_to_ws, receiv_from_ws).await;
@@ -174,27 +198,46 @@ use crate::proxy::InnerProxy::InnerProxy;
 async fn work(
     trade_pair_arc: Arc<Mutex<TradePair>>,
     hwnd: usize,
-    tx_arc: Arc<Mutex<UnboundedSender<Message>>>,
+    tx: UnboundedSender<Message>,
     rx: &mut UnboundedReceiver<Message>,
     proxy_str: &Option<String>,
 ) {
     let url = "wss://fstream.binance.com/ws".to_string();
     if !proxy_str.is_none() {
         let proxy_url = proxy_str.clone().unwrap();
-        let proxy = InnerProxy::from_proxy_str(&proxy_url).expect("failed to parse inner proxy");
-        let tcp_stream = proxy
-            .connect_async(&url)
-            .await
-            .unwrap_or_else(|e| panic!("failed to create proxy stream: {}", e));
-        let (ws_stream, _) = client_async_tls(&url, tcp_stream)
-            .await
-            .expect("Failed to connect");
-        get_ws_stream(ws_stream, Arc::clone(&trade_pair_arc), hwnd,Arc::clone(&tx_arc), rx).await;
+        let proxy = match InnerProxy::from_proxy_str(&proxy_url) {
+            Ok(proxy) => proxy,
+            Err(_) => return,
+        };
+        let tcp_stream = match proxy.connect_async(&url).await {
+            Ok(stream) => stream,
+            Err(_) => return,
+        };
+        let (ws_stream, _) = match client_async_tls(&url, tcp_stream).await {
+            Ok(stream) => stream,
+            Err(_) => return,
+        };
+        ws_handle(
+            ws_stream,
+            Arc::clone(&trade_pair_arc),
+            hwnd,
+            tx.clone(),
+            rx,
+        )
+        .await;
     } else {
-        let (ws_stream, _) = connect_async_tls_with_config(&url, None, true, None)
-            .await
-            .expect("Failed to connect");
-        get_ws_stream(ws_stream,Arc::clone(&trade_pair_arc), hwnd,Arc::clone(&tx_arc), rx).await;
+        let (ws_stream, _) = match connect_async_tls_with_config(&url, None, true, None).await {
+            Ok(stream) => stream,
+            Err(_) => return,
+        };
+        ws_handle(
+            ws_stream,
+            Arc::clone(&trade_pair_arc),
+            hwnd,
+            tx.clone(),
+            rx,
+        )
+        .await;
     }
 }
 
@@ -202,7 +245,7 @@ async fn receive_from_ui(
     trade_pair_arc: Arc<Mutex<TradePair>>,
     hwnd: usize,
     mut receiver: tokio::sync::mpsc::Receiver<TradePair>,
-    tx_arc: Arc<Mutex<UnboundedSender<Message>>>,
+    tx: UnboundedSender<Message>,
 ) {
     loop {
         while let Some(new_trade_pair) = receiver.recv().await {
@@ -210,35 +253,29 @@ async fn receive_from_ui(
             if *last_trade_pair == new_trade_pair {
                 continue;
             }
-            unsubscribe(&last_trade_pair, Arc::clone(&tx_arc));
-            subscribe(&new_trade_pair, Arc::clone(&tx_arc));
+            unsubscribe(&last_trade_pair, tx.clone());
+            subscribe(&new_trade_pair, tx.clone());
             *last_trade_pair = new_trade_pair;
             send_message_to_ui(hwnd, ApiMessage::Notify("切换中...".to_string()));
         }
     }
 }
 
-fn subscribe(trade_pair: &TradePair, tx_arc: Arc<Mutex<UnboundedSender<Message>>>) {
+fn subscribe(trade_pair: &TradePair, tx: UnboundedSender<Message>) {
     let ws_name = &TRADE_INFO.get(trade_pair).unwrap().ws_name.clone();
-    {
-        let tx = tx_arc.lock().unwrap();
-        let message_str = format!(
-            r##"{{"method":"SUBSCRIBE","params":["{}"],"id": 1}}"##,
-            ws_name
-        );
-        tx.unbounded_send(Message::Text(message_str)).unwrap();
-    }
+    let message_str = format!(
+        r##"{{"method":"SUBSCRIBE","params":["{}"],"id": 1}}"##,
+        ws_name
+    );
+    tx.unbounded_send(Message::Text(message_str)).unwrap();
 }
-fn unsubscribe(trade_pair: &TradePair, tx_arc: Arc<Mutex<UnboundedSender<Message>>>) {
+fn unsubscribe(trade_pair: &TradePair, tx: UnboundedSender<Message>) {
     let ws_name = &TRADE_INFO.get(trade_pair).unwrap().ws_name.clone();
-    {
-        let tx = tx_arc.lock().unwrap();
-        let message_str = format!(
-            r##"{{"method":"UNSUBSCRIBE","params":["{}"],"id": 1}}"##,
-            ws_name
-        );
-        tx.unbounded_send(Message::Text(message_str)).unwrap();
-    }
+    let message_str = format!(
+        r##"{{"method":"UNSUBSCRIBE","params":["{}"],"id": 1}}"##,
+        ws_name
+    );
+    tx.unbounded_send(Message::Text(message_str)).unwrap();
 }
 
 pub async fn run(
@@ -248,19 +285,18 @@ pub async fn run(
     proxy_str: Option<String>,
 ) {
     let (tx, mut rx) = futures_channel::mpsc::unbounded::<Message>();
-    let tx_arc = Arc::new(Mutex::new(tx));
     let trade_pair_arc = Arc::new(Mutex::new(trade_pair));
     tokio::spawn(receive_from_ui(
         Arc::clone(&trade_pair_arc),
         hwnd.0 as usize,
         receiver,
-        Arc::clone(&tx_arc),
+        tx.clone(),
     ));
     loop {
         work(
             Arc::clone(&trade_pair_arc),
             hwnd.0 as usize,
-            Arc::clone(&tx_arc),
+            tx.clone(),
             &mut rx,
             &proxy_str,
         )

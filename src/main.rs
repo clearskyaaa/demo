@@ -19,6 +19,8 @@ struct Args {
     proxy: Option<String>,
 }
 fn main() -> Result<()> {
+    
+
     let args = Args::parse();
     let (tx, rx):(mpsc::Sender<api::TradePair>, mpsc::Receiver<api::TradePair>) = mpsc::channel(1);
     

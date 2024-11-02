@@ -156,11 +156,112 @@ impl Window {
         dst_rect
     }
 
+    fn draw_price(
+        graphics: *mut GpGraphics,
+        font_price: *mut GpFont,
+        brush_price: *mut GpBrush,
+        font_pair: *mut GpFont,
+        brush_pair: *mut GpBrush,
+        window: &mut Window,
+        price:&api::Price
+    ) {
+        let lay_box_price = RectF {
+            X: 0.,
+            Y: window.height as f32 / 2.2,
+            Width: window.width as f32,
+            Height: window.height as f32 / 2.,
+        };
+        let lay_box_pair = RectF {
+            X: 0.,
+            Y: window.height as f32 * 0.1,
+            Width: window.width as f32,
+            Height: window.height as f32 / 2.,
+        };
+        let content_str = format!("{:.1}", price.tag_price);
+        let bound = Self::meansuer_string(
+            graphics,
+            Self::string_to_pwcstr(&content_str),
+            font_price,
+            &lay_box_price,
+        );
+        let dst_rect = Self::generate_mid_rect(&lay_box_price, &bound);
+        unsafe {
+            GdipDrawString(
+                graphics,
+                Self::string_to_pwcstr(&content_str),
+                -1,
+                font_price,
+                &dst_rect,
+                std::ptr::null_mut(),
+                brush_price,
+            );
+        }
+        let content_str = &api::TRADE_INFO.get(&window.trade_pair).unwrap().show_name;
+
+        let bound = Self::meansuer_string(
+            graphics,
+            Self::string_to_pwcstr(&content_str),
+            font_pair,
+            &lay_box_pair,
+        );
+        let dst_rect = Self::generate_mid_rect(&lay_box_pair, &bound);
+        unsafe {
+            GdipDrawString(
+                graphics,
+                Self::string_to_pwcstr(&content_str),
+                -1,
+                font_pair,
+                &dst_rect,
+                std::ptr::null_mut(),
+                brush_pair,
+            );
+        }
+    }
+
+    fn draw_notify(graphics: *mut GpGraphics, font: *const GpFont, brush:* const GpBrush, window:& mut Window, not_msg:&str){
+        let lay_box = RectF {
+            X: 0.,
+            Y: 0.,
+            Width: window.width as f32,
+            Height: window.height as f32,
+        };
+        let bound = Self::meansuer_string(
+            graphics,
+            Self::string_to_pwcstr(not_msg),
+            font,
+            &lay_box,
+        );
+        let dst_rect = Self::generate_mid_rect(&lay_box, &bound);
+        unsafe{GdipDrawString(
+            graphics,
+            Self::string_to_pwcstr(not_msg),
+            -1,
+            font,
+            &dst_rect,
+            std::ptr::null_mut(),
+            brush,
+        );}
+    }
+
     fn fresh_window(hwnd: &HWND, wparam: &WPARAM) -> Result<()> {
         unsafe {
             let api_msg = Box::from_raw(wparam.0 as *mut api::ApiMessage);
             let window = &mut *(GetWindowLongPtrW(*hwnd, GWLP_USERDATA) as *mut Self);
-
+            match &*api_msg {
+                api::ApiMessage::Price(price) => {
+                    let check;
+                    let cur_trade_name = api::TRADE_INFO
+                        .get(&window.trade_pair)
+                        .unwrap()
+                        .pair_name
+                        .clone();
+                    check = cur_trade_name == price.name;
+                    if !check {
+                        return Ok(());
+                    }
+                }
+                _ => {}
+            }
             let mut client_rect = RECT::default();
             GetClientRect(*hwnd, &mut client_rect)?;
             let width = client_rect.right - client_rect.left;
@@ -185,81 +286,10 @@ impl Window {
 
             match *api_msg {
                 api::ApiMessage::Price(price) => {
-                    let mut check = false;
-                    let cur_trade_name = api::TRADE_INFO.get(&window.trade_pair).unwrap().pair_name.clone();
-                    check =  cur_trade_name == price.name;
-                    if check{
-                        let content_str = format!("{:.1}", price.tag_price);
-                    let lay_box = RectF {
-                        X: 0.,
-                        Y: window.height as f32 / 2.2,
-                        Width: window.width as f32,
-                        Height: window.height as f32 / 2.,
-                    };
-                    let bound = Self::meansuer_string(
-                        graphics,
-                        Self::string_to_pwcstr(&content_str),
-                        font,
-                        &lay_box,
-                    );
-                    let dst_rect = Self::generate_mid_rect(&lay_box, &bound);
-                    GdipDrawString(
-                        graphics,
-                        Self::string_to_pwcstr(&content_str),
-                        -1,
-                        font,
-                        &dst_rect,
-                        std::ptr::null_mut(),
-                        brush,
-                    );
-                    let content_str = &api::TRADE_INFO.get(&window.trade_pair).unwrap().show_name;
-                    let lay_box = RectF {
-                        X: 0.,
-                        Y: window.height as f32 * 0.1,
-                        Width: window.width as f32,
-                        Height: window.height as f32 / 2.,
-                    };
-                    let bound = Self::meansuer_string(
-                        graphics,
-                        Self::string_to_pwcstr(&content_str),
-                        font_small,
-                        &lay_box,
-                    );
-                    let dst_rect = Self::generate_mid_rect(&lay_box, &bound);
-                    GdipDrawString(
-                        graphics,
-                        Self::string_to_pwcstr(&content_str),
-                        -1,
-                        font_small,
-                        &dst_rect,
-                        std::ptr::null_mut(),
-                        brush,
-                    );
-                    }
+                    Self::draw_price(graphics, font, brush, font_small, brush, window, &price);
                 }
                 api::ApiMessage::Notify(not_msg) => {
-                    let lay_box = RectF {
-                        X: 0.,
-                        Y: 0.,
-                        Width: window.width as f32,
-                        Height: window.height as f32,
-                    };
-                    let bound = Self::meansuer_string(
-                        graphics,
-                        Self::string_to_pwcstr(&not_msg),
-                        font,
-                        &lay_box,
-                    );
-                    let dst_rect = Self::generate_mid_rect(&lay_box, &bound);
-                    GdipDrawString(
-                        graphics,
-                        Self::string_to_pwcstr(&not_msg),
-                        -1,
-                        font,
-                        &dst_rect,
-                        std::ptr::null_mut(),
-                        brush,
-                    );
+                    Self::draw_notify(graphics, font, brush, window, &not_msg);
                 }
             }
             let mut blend = BLENDFUNCTION::default();
@@ -344,21 +374,13 @@ impl Window {
                     AppendMenuW(menu, MF_SEPARATOR, 0, None).unwrap();
                     AppendMenuW(menu, MF_STRING, Self::COMAMND_EXIT, w!("退出")).unwrap();
 
-                    let menu_info = MENUINFO {
-                        cbSize: std::mem::size_of::<MENUINFO>() as u32,
-                        fMask: MIM_STYLE,
-                        dwStyle: MNS_CHECKORBMP | MNS_AUTODISMISS,
-                        ..Default::default()
-                    };
-                    SetMenuInfo(menu, &menu_info).unwrap();
-
                     let point = POINT {
                         x: Self::GET_X_LPARAM(lparam),
                         y: Self::GET_Y_LPARAM(lparam),
                     };
                     let mut window_rect = RECT::default();
                     GetWindowRect(hwnd, &mut window_rect).unwrap();
-                    TrackPopupMenu(
+                    let _ = TrackPopupMenu(
                         menu,
                         TPM_RIGHTBUTTON,
                         point.x + window_rect.left,
@@ -366,8 +388,7 @@ impl Window {
                         0,
                         hwnd,
                         None,
-                    )
-                    .unwrap();
+                    );
                     LRESULT(0)
                 }
                 WM_COMMAND => {
@@ -434,9 +455,7 @@ impl Window {
                     PostQuitMessage(0);
                     LRESULT(0)
                 }
-                _ => {
-                    DefWindowProcW(hwnd, message, wparam, lparam)
-                }
+                _ => DefWindowProcW(hwnd, message, wparam, lparam),
             }
         }
     }

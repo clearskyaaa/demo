@@ -555,10 +555,17 @@ impl Window {
                 };
                 return Err(err.into());
             }
-            let child_hwnd = FindWindowExW(parent_hwnd, None, w!("TrayNotifyWnd"), None)?;
+            let mut child_hwnd = FindWindowExW(parent_hwnd, None, w!("ReBarWindow32"), None)?;
             if child_hwnd.is_invalid() {
                 let err = WindowError {
-                    erro_msg: "can not find TrayNotifyWnd window".to_string(),
+                    erro_msg: "can not find ReBarWindow32 window".to_string(),
+                };
+                return Err(err.into());
+            }
+            child_hwnd = FindWindowExW(child_hwnd, None, w!("MSTaskSwWClass"), None)?;
+            if child_hwnd.is_invalid() {
+                let err = WindowError {
+                    erro_msg: "can not find MSTaskSwWClass window".to_string(),
                 };
                 return Err(err.into());
             }

@@ -29,32 +29,39 @@ struct ApiResult {
     id: u32,
 }
 
-fn string_to_f64<'de, D>(deserializer: D) -> Result<f64, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s = String::deserialize(deserializer)?;
-    s.parse::<f64>().map_err(serde::de::Error::custom)
+#[derive(Debug, Deserialize)]
+struct Ping {
+    pub ping: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 pub struct Price {
-    #[serde(rename = "e")]
-    pub event_type: String,
-    #[serde(rename = "E")]
-    pub time_stamp: u64,
-    #[serde(rename = "s")]
     pub name: String,
-    #[serde(rename = "p", deserialize_with = "string_to_f64")]
     pub tag_price: f64,
-    #[serde(rename = "i", deserialize_with = "string_to_f64")]
-    pub spot_index_price: f64,
-    #[serde(rename = "P", deserialize_with = "string_to_f64")]
-    pub predict_price: f64,
-    #[serde(rename = "r", deserialize_with = "string_to_f64")]
-    pub fee: f64,
-    #[serde(rename = "T")]
-    pub next_fee_time: u64,
+}
+
+impl<'de> Deserialize<'de> for Price {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct TempPrice {
+            ch: String,
+            tick: Tick,
+        }
+
+        #[derive(Deserialize)]
+        struct Tick {
+            close: f64,
+        }
+        let temp: TempPrice = Deserialize::deserialize(deserializer)?;
+
+        Ok(Price {
+            name: temp.ch,
+            tag_price: temp.tick.close,
+        })
+    }
 }
 
 pub enum ApiMessage {
@@ -80,25 +87,25 @@ lazy_static! {
         (
             TradePair::BTCUSDT,
             TradePairInfo {
-                ws_name: "btcusdt@markPrice".to_string(),
+                ws_name: "market.BTC-USDT.detail".to_string(),
                 show_name: "BTC/USDT".to_string(),
-                pair_name: "BTCUSDT".to_string(),
+                pair_name: "market.BTC-USDT.detail".to_string(),
             }
         ),
         (
             TradePair::ETHUSDT,
             TradePairInfo {
-                ws_name: "ethusdt@markPrice".to_string(),
+                ws_name: "market.ETH-USDT.detail".to_string(),
                 show_name: "ETH/USDT".to_string(),
-                pair_name: "ETHUSDT".to_string()
+                pair_name: "market.ETH-USDT.detail".to_string()
             }
         ),
         (
             TradePair::SOLUSDT,
             TradePairInfo {
-                ws_name: "solusdt@markPrice".to_string(),
+                ws_name: "market.SOL-USDT.detail".to_string(),
                 show_name: "SOL/USDT".to_string(),
-                pair_name: "SOLUSDT".to_string()
+                pair_name: "market.SOL-USDT.detail".to_string()
             }
         ),
     ]
@@ -120,7 +127,23 @@ fn send_message_to_ui(hwnd: usize, message: ApiMessage) {
     }
 }
 
+use byteorder::{ByteOrder, LittleEndian};
+use flate2::read::GzDecoder;
+use std::io::Read;
 use tokio::time::{self, Duration};
+fn send_ws_message(message: Message, tx: UnboundedSender<Message>) {
+    match message {
+        Message::Text(str_data) => {
+            let _ = tx.unbounded_send(Message::Text(str_data));
+        }
+        Message::Pong(pong) => {
+            let pong_str = format!(r##"{{"pong":{}}}"##, LittleEndian::read_u64(&pong));
+            let _ = tx.unbounded_send(Message::Text(pong_str));
+        }
+        _ => {}
+    }
+}
+
 async fn ws_handle<T>(
     ws_stream: T,
     trade_pair_arc: Arc<Mutex<TradePair>>,
@@ -142,24 +165,38 @@ async fn ws_handle<T>(
     }
     let (write, mut read) = ws_stream.split();
     let send_to_ws = rx.map(Ok).forward(write);
-    let timeout_duration = Duration::from_secs(10); 
-    let receiv_from_ws = async{
-        loop{
+    let timeout_duration = Duration::from_secs(10);
+    let receiv_from_ws = async {
+        loop {
             let timeout_result = time::timeout(timeout_duration, read.next()).await;
-            if timeout_result.is_err(){
+            if timeout_result.is_err() {
                 println!("连接超时");
                 let test_msg = Message::Text("haha".to_string());
-                    tx.unbounded_send(test_msg).unwrap();
+                tx.unbounded_send(test_msg).unwrap();
                 continue;
             }
             let result = timeout_result.unwrap();
-            if result.is_none(){
+            if result.is_none() {
                 break;
             }
-            let message =result.unwrap();
+            let messagex = result.unwrap();
+            let message;
+            if let Ok(Message::Binary(bin)) = messagex {
+                let mut decoder = GzDecoder::new(&bin[..]);
+                let mut decompressed_data = String::new();
+                decoder.read_to_string(&mut decompressed_data).unwrap();
+                let ping = serde_json::from_str::<Ping>(&decompressed_data);
+                if ping.is_ok() {
+                    let ping = ping.unwrap();
+                    message = Ok(Message::Ping(ping.ping.to_le_bytes().to_vec()));
+                } else {
+                    message = Ok(Message::Text(decompressed_data));
+                }
+            } else {
+                message = messagex;
+            }
             match message {
                 Ok(Message::Text(str_data)) => {
-                    println!("str_data:{}", str_data);
                     let price = serde_json::from_str::<Price>(&str_data);
                     if !price.is_ok() {
                         // let api_result = serde_json::from_str::<ApiResult>(&str_data);
@@ -167,6 +204,7 @@ async fn ws_handle<T>(
                         //     break;
                         // }
                         // continue;
+                        println!("str_data:{}", str_data);
                         continue;
                     }
                     let price = price.unwrap();
@@ -175,7 +213,8 @@ async fn ws_handle<T>(
                 Ok(Message::Ping(payload)) => {
                     println!("ping");
                     let pong_msg = Message::Pong(payload.clone());
-                    tx.unbounded_send(pong_msg).unwrap();
+                    // tx.unbounded_send(pong_msg).unwrap();
+                    send_ws_message(pong_msg, tx.clone());
                 }
                 Ok(Message::Close(_)) => {
                     println!("close");
@@ -183,6 +222,13 @@ async fn ws_handle<T>(
                 Err(err) => {
                     println!("ws message is err:{:?}", err);
                     break;
+                }
+                Ok(Message::Binary(bin)) => {
+                    println!("bin message:{:?}", bin);
+                    let mut decoder = GzDecoder::new(&bin[..]);
+                    let mut decompressed_data = String::new();
+                    decoder.read_to_string(&mut decompressed_data).unwrap();
+                    println!("Received decompressed message: {}", decompressed_data);
                 }
                 _ => {
                     println!("other ws message");
@@ -202,7 +248,7 @@ async fn work(
     rx: &mut UnboundedReceiver<Message>,
     proxy_str: &Option<String>,
 ) {
-    let url = "wss://fstream.binance.com/ws".to_string();
+    let url = "wss://api.hbdm.com/linear-swap-ws".to_string();
     if !proxy_str.is_none() {
         let proxy_url = proxy_str.clone().unwrap();
         let proxy = match InnerProxy::from_proxy_str(&proxy_url) {
@@ -217,27 +263,13 @@ async fn work(
             Ok(stream) => stream,
             Err(_) => return,
         };
-        ws_handle(
-            ws_stream,
-            Arc::clone(&trade_pair_arc),
-            hwnd,
-            tx.clone(),
-            rx,
-        )
-        .await;
+        ws_handle(ws_stream, Arc::clone(&trade_pair_arc), hwnd, tx.clone(), rx).await;
     } else {
         let (ws_stream, _) = match connect_async_tls_with_config(&url, None, true, None).await {
             Ok(stream) => stream,
             Err(_) => return,
         };
-        ws_handle(
-            ws_stream,
-            Arc::clone(&trade_pair_arc),
-            hwnd,
-            tx.clone(),
-            rx,
-        )
-        .await;
+        ws_handle(ws_stream, Arc::clone(&trade_pair_arc), hwnd, tx.clone(), rx).await;
     }
 }
 
@@ -263,8 +295,8 @@ async fn receive_from_ui(
 
 fn subscribe(trade_pair: &TradePair, tx: UnboundedSender<Message>) {
     let ws_name = &TRADE_INFO.get(trade_pair).unwrap().ws_name.clone();
-    let message_str = format!(
-        r##"{{"method":"SUBSCRIBE","params":["{}"],"id": 1}}"##,
+    let mut message_str = format!(
+        r##"{{"sub":"{}","id":"1"}}"##,
         ws_name
     );
     tx.unbounded_send(Message::Text(message_str)).unwrap();
@@ -272,7 +304,7 @@ fn subscribe(trade_pair: &TradePair, tx: UnboundedSender<Message>) {
 fn unsubscribe(trade_pair: &TradePair, tx: UnboundedSender<Message>) {
     let ws_name = &TRADE_INFO.get(trade_pair).unwrap().ws_name.clone();
     let message_str = format!(
-        r##"{{"method":"UNSUBSCRIBE","params":["{}"],"id": 1}}"##,
+        r##"{{"unsub":"{}","id":"1"}}"##,
         ws_name
     );
     tx.unbounded_send(Message::Text(message_str)).unwrap();

@@ -74,12 +74,14 @@ pub enum TradePair {
     BTCUSDT,
     ETHUSDT,
     SOLUSDT,
+    HTXUSDT
 }
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct TradePairInfo {
     pub ws_name: String,
     pub show_name: String,
     pub pair_name: String,
+    pub api: String
 }
 
 lazy_static! {
@@ -90,6 +92,7 @@ lazy_static! {
                 ws_name: "market.BTC-USDT.detail".to_string(),
                 show_name: "BTC/USDT".to_string(),
                 pair_name: "market.BTC-USDT.detail".to_string(),
+                api:"wss://api.hbdm.com/linear-swap-ws".to_string()
             }
         ),
         (
@@ -97,7 +100,8 @@ lazy_static! {
             TradePairInfo {
                 ws_name: "market.ETH-USDT.detail".to_string(),
                 show_name: "ETH/USDT".to_string(),
-                pair_name: "market.ETH-USDT.detail".to_string()
+                pair_name: "market.ETH-USDT.detail".to_string(),
+                api:"wss://api.hbdm.com/linear-swap-ws".to_string()
             }
         ),
         (
@@ -105,7 +109,17 @@ lazy_static! {
             TradePairInfo {
                 ws_name: "market.SOL-USDT.detail".to_string(),
                 show_name: "SOL/USDT".to_string(),
-                pair_name: "market.SOL-USDT.detail".to_string()
+                pair_name: "market.SOL-USDT.detail".to_string(),
+                api:"wss://api.hbdm.com/linear-swap-ws".to_string()
+            }
+        ),
+        (
+            TradePair::HTXUSDT,
+            TradePairInfo {
+                ws_name: "market.htxusdt.detail".to_string(),
+                show_name: "HTX/USDT".to_string(),
+                pair_name: "market.htxusdt.detail".to_string(),
+                api:"wss://api.huobi.pro/ws".to_string()
             }
         ),
     ]
@@ -171,7 +185,7 @@ async fn ws_handle<T>(
             let timeout_result = time::timeout(timeout_duration, read.next()).await;
             if timeout_result.is_err() {
                 println!("连接超时");
-                let test_msg = Message::Text("haha".to_string());
+                let test_msg = Message::Close(None);
                 tx.unbounded_send(test_msg).unwrap();
                 continue;
             }
@@ -248,7 +262,11 @@ async fn work(
     rx: &mut UnboundedReceiver<Message>,
     proxy_str: &Option<String>,
 ) {
-    let url = "wss://api.hbdm.com/linear-swap-ws".to_string();
+    let url;
+    {
+        let trade_pair = trade_pair_arc.lock().unwrap();
+        url = TRADE_INFO.get(&trade_pair).unwrap().api.clone();
+    }
     if !proxy_str.is_none() {
         let proxy_url = proxy_str.clone().unwrap();
         let proxy = match InnerProxy::from_proxy_str(&proxy_url) {
@@ -285,20 +303,27 @@ async fn receive_from_ui(
             if *last_trade_pair == new_trade_pair {
                 continue;
             }
-            unsubscribe(&last_trade_pair, tx.clone());
-            subscribe(&new_trade_pair, tx.clone());
-            *last_trade_pair = new_trade_pair;
-            send_message_to_ui(hwnd, ApiMessage::Notify("切换中...".to_string()));
+            if new_trade_pair != TradePair::HTXUSDT{
+                unsubscribe(&last_trade_pair, tx.clone());
+                subscribe(&new_trade_pair, tx.clone());
+                *last_trade_pair = new_trade_pair;
+                send_message_to_ui(hwnd, ApiMessage::Notify("切换中...".to_string()));
+            }else{
+                *last_trade_pair = new_trade_pair;
+                let test_msg = Message::Close(None);
+                tx.unbounded_send(test_msg).unwrap();
+            }
         }
     }
 }
 
 fn subscribe(trade_pair: &TradePair, tx: UnboundedSender<Message>) {
     let ws_name = &TRADE_INFO.get(trade_pair).unwrap().ws_name.clone();
-    let mut message_str = format!(
+    let message_str = format!(
         r##"{{"sub":"{}","id":"1"}}"##,
         ws_name
     );
+    println!("subscribe:{}", message_str);
     tx.unbounded_send(Message::Text(message_str)).unwrap();
 }
 fn unsubscribe(trade_pair: &TradePair, tx: UnboundedSender<Message>) {

@@ -46,6 +46,7 @@ impl Window {
     const COMAMND_ETHUSDT: usize = 2;
     const COMAMND_SOLUSDT: usize = 3;
     const COMAMND_EXIT: usize = 4;
+    const COMAMND_HTXUSDT: usize = 5;
 
     const ALPHA_SHIFT: u32 = 24;
     const RED_SHIFT: u32 = 16;
@@ -177,7 +178,12 @@ impl Window {
             Width: window.width as f32,
             Height: window.height as f32 / 2.,
         };
-        let content_str = format!("{:.1}", price.tag_price);
+        let content_str;
+        if price.tag_price < 0.01{
+            content_str = format!("{:E}", price.tag_price);
+        }else{
+            content_str = format!("{:.1}", price.tag_price);
+        }
         let bound = Self::meansuer_string(
             graphics,
             Self::string_to_pwcstr(&content_str),
@@ -282,7 +288,7 @@ impl Window {
             GdipGraphicsClear(graphics, Self::make_argb(1, 255, 255, 255));
             let font = Self::create_font("Microsoft YaHei UI", 9.);
             let font_small = Self::create_font("Microsoft YaHei UI", 9.);
-            let brush = Self::create_solid_brush(Self::make_argb(255, 0, 0, 0));
+            let brush = Self::create_solid_brush(Self::make_argb(255, 255, 255, 255));
 
             match *api_msg {
                 api::ApiMessage::Price(price) => {
@@ -371,6 +377,18 @@ impl Window {
                         ),
                     )
                     .unwrap();
+                    AppendMenuW(
+                        menu,
+                        MF_STRING,
+                        Self::COMAMND_HTXUSDT,
+                        Self::string_to_pwcstr(
+                            &api::TRADE_INFO
+                                .get(&api::TradePair::HTXUSDT)
+                                .unwrap()
+                                .show_name,
+                        ),
+                    )
+                    .unwrap();
                     AppendMenuW(menu, MF_SEPARATOR, 0, None).unwrap();
                     AppendMenuW(menu, MF_STRING, Self::COMAMND_EXIT, w!("退出")).unwrap();
 
@@ -418,6 +436,15 @@ impl Window {
                                 window
                                     .sender
                                     .blocking_send(api::TradePair::SOLUSDT)
+                                    .unwrap();
+                            }
+                        }
+                        Self::COMAMND_HTXUSDT => {
+                            if window.trade_pair != api::TradePair::HTXUSDT {
+                                window.trade_pair = api::TradePair::HTXUSDT;
+                                window
+                                    .sender
+                                    .blocking_send(api::TradePair::HTXUSDT)
                                     .unwrap();
                             }
                         }
@@ -555,17 +582,24 @@ impl Window {
                 };
                 return Err(err.into());
             }
-            let mut child_hwnd = FindWindowExW(parent_hwnd, None, w!("ReBarWindow32"), None)?;
+            // let mut child_hwnd = FindWindowExW(parent_hwnd, None, w!("ReBarWindow32"), None)?;
+            // if child_hwnd.is_invalid() {
+            //     let err = WindowError {
+            //         erro_msg: "can not find ReBarWindow32 window".to_string(),
+            //     };
+            //     return Err(err.into());
+            // }
+            // child_hwnd = FindWindowExW(child_hwnd, None, w!("MSTaskSwWClass"), None)?;
+            // if child_hwnd.is_invalid() {
+            //     let err = WindowError {
+            //         erro_msg: "can not find MSTaskSwWClass window".to_string(),
+            //     };
+            //     return Err(err.into());
+            // }
+            let child_hwnd = FindWindowExW(parent_hwnd, None, w!("TrayNotifyWnd"), None)?;
             if child_hwnd.is_invalid() {
                 let err = WindowError {
-                    erro_msg: "can not find ReBarWindow32 window".to_string(),
-                };
-                return Err(err.into());
-            }
-            child_hwnd = FindWindowExW(child_hwnd, None, w!("MSTaskSwWClass"), None)?;
-            if child_hwnd.is_invalid() {
-                let err = WindowError {
-                    erro_msg: "can not find MSTaskSwWClass window".to_string(),
+                    erro_msg: "can not find TrayNotifyWnd window".to_string(),
                 };
                 return Err(err.into());
             }

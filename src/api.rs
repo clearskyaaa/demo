@@ -12,6 +12,7 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::{client_async_tls, connect_async_tls_with_config, WebSocketStream};
 use windows::Win32::Foundation::*;
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
+use strum_macros::EnumIter;
 
 #[derive(Deserialize, Debug)]
 #[serde(untagged)]
@@ -69,7 +70,7 @@ pub enum ApiMessage {
     Notify(String),
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone,EnumIter)]
 pub enum TradePair {
     BTCUSDT,
     ETHUSDT,

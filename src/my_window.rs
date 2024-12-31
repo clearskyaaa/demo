@@ -1,5 +1,7 @@
 use anyhow::Result;
 use core::ffi::c_void;
+use strum::IntoEnumIterator;
+use strum_macros::EnumIter;
 use thiserror::Error;
 use windows::Win32::Graphics::Gdi::BeginPaint;
 use windows::Win32::Graphics::Gdi::{
@@ -40,13 +42,19 @@ struct WindowError {
     erro_msg: String,
 }
 
+#[derive(EnumIter)]
+enum COMMAND{
+    BTCUSDT = 1000,
+    ETHUSDT = 1001,
+    SOLUSDT = 1002,
+    HTXUSDT = 1003,
+    FONT_WHITE = 1004,
+    FONT_BLACK = 1005,
+    EXIT = 9000,
+}
+static mut font_color:u32 = Window::make_argb(255, 255, 255, 255);
 impl Window {
     pub const WM_FRESH: u32 = WM_USER + 1;
-    const COMAMND_BTCUSDT: usize = 1;
-    const COMAMND_ETHUSDT: usize = 2;
-    const COMAMND_SOLUSDT: usize = 3;
-    const COMAMND_EXIT: usize = 4;
-    const COMAMND_HTXUSDT: usize = 5;
 
     const ALPHA_SHIFT: u32 = 24;
     const RED_SHIFT: u32 = 16;
@@ -75,7 +83,7 @@ impl Window {
         }
     }
 
-    fn make_argb(a: u32, r: u32, g: u32, b: u32) -> u32 {
+    const fn make_argb(a: u32, r: u32, g: u32, b: u32) -> u32 {
         (b << Self::BLUE_SHIFT)
             | (g << Self::GREEN_SHIFT)
             | (r << Self::RED_SHIFT)
@@ -288,7 +296,7 @@ impl Window {
             GdipGraphicsClear(graphics, Self::make_argb(1, 255, 255, 255));
             let font = Self::create_font("Microsoft YaHei UI", 9.);
             let font_small = Self::create_font("Microsoft YaHei UI", 9.);
-            let brush = Self::create_solid_brush(Self::make_argb(255, 255, 255, 255));
+            let brush = Self::create_solid_brush(font_color);
 
             match *api_msg {
                 api::ApiMessage::Price(price) => {
@@ -341,56 +349,29 @@ impl Window {
             match message {
                 WM_RBUTTONDOWN => {
                     let menu = CreatePopupMenu().unwrap();
-                    AppendMenuW(
-                        menu,
-                        MF_STRING,
-                        Self::COMAMND_BTCUSDT,
-                        Self::string_to_pwcstr(
-                            &api::TRADE_INFO
-                                .get(&api::TradePair::BTCUSDT)
-                                .unwrap()
-                                .show_name,
-                        ),
-                    )
-                    .unwrap();
-                    AppendMenuW(
-                        menu,
-                        MF_STRING,
-                        Self::COMAMND_ETHUSDT,
-                        Self::string_to_pwcstr(
-                            &api::TRADE_INFO
-                                .get(&api::TradePair::ETHUSDT)
-                                .unwrap()
-                                .show_name,
-                        ),
-                    )
-                    .unwrap();
-                    AppendMenuW(
-                        menu,
-                        MF_STRING,
-                        Self::COMAMND_SOLUSDT,
-                        Self::string_to_pwcstr(
-                            &api::TRADE_INFO
-                                .get(&api::TradePair::SOLUSDT)
-                                .unwrap()
-                                .show_name,
-                        ),
-                    )
-                    .unwrap();
-                    AppendMenuW(
-                        menu,
-                        MF_STRING,
-                        Self::COMAMND_HTXUSDT,
-                        Self::string_to_pwcstr(
-                            &api::TRADE_INFO
-                                .get(&api::TradePair::HTXUSDT)
-                                .unwrap()
-                                .show_name,
-                        ),
-                    )
-                    .unwrap();
+                    let tradepair_iter = api::TradePair::iter();
+                    let commmand_iter = COMMAND::iter();
+                    let pair_iter = tradepair_iter.zip(commmand_iter);
+                    for (trade,command) in pair_iter{
+                        AppendMenuW(
+                            menu,
+                            MF_STRING,
+                            command as usize,
+                            Self::string_to_pwcstr(
+                                &api::TRADE_INFO
+                                    .get(&trade)
+                                    .unwrap()
+                                    .show_name,
+                            ),
+                        )
+                        .unwrap();
+                    }
                     AppendMenuW(menu, MF_SEPARATOR, 0, None).unwrap();
-                    AppendMenuW(menu, MF_STRING, Self::COMAMND_EXIT, w!("退出")).unwrap();
+                    AppendMenuW(menu, MF_STRING, COMMAND::FONT_WHITE as usize, w!("白字")).unwrap();
+                    AppendMenuW(menu, MF_STRING, COMMAND::FONT_BLACK as usize, w!("黑字")).unwrap();
+
+                    AppendMenuW(menu, MF_SEPARATOR, 0, None).unwrap();
+                    AppendMenuW(menu, MF_STRING, COMMAND::EXIT as usize, w!("退出")).unwrap();
 
                     let point = POINT {
                         x: Self::GET_X_LPARAM(lparam),
@@ -411,47 +392,33 @@ impl Window {
                 }
                 WM_COMMAND => {
                     let window = &mut *(GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut Self);
-                    match wparam.0 as usize {
-                        Self::COMAMND_BTCUSDT => {
-                            if window.trade_pair != api::TradePair::BTCUSDT {
-                                window.trade_pair = api::TradePair::BTCUSDT;
+                    let tradepair_iter = api::TradePair::iter();
+                    let commmand_iter = COMMAND::iter().map(|x|x as usize);
+                    let pair_iter = commmand_iter.zip(tradepair_iter);
+                    let params = wparam.0 as usize;
+                    for (command,trade) in pair_iter{
+                        if params == command{
+                            if window.trade_pair != trade {
+                                window.trade_pair = trade.clone();
                                 window
                                     .sender
-                                    .blocking_send(api::TradePair::BTCUSDT)
+                                    .blocking_send(trade)
                                     .unwrap();
                             }
+                            return LRESULT(0);
                         }
-                        Self::COMAMND_ETHUSDT => {
-                            if window.trade_pair != api::TradePair::ETHUSDT {
-                                window.trade_pair = api::TradePair::ETHUSDT;
-                                window
-                                    .sender
-                                    .blocking_send(api::TradePair::ETHUSDT)
-                                    .unwrap();
-                            }
-                        }
-                        Self::COMAMND_SOLUSDT => {
-                            if window.trade_pair != api::TradePair::SOLUSDT {
-                                window.trade_pair = api::TradePair::SOLUSDT;
-                                window
-                                    .sender
-                                    .blocking_send(api::TradePair::SOLUSDT)
-                                    .unwrap();
-                            }
-                        }
-                        Self::COMAMND_HTXUSDT => {
-                            if window.trade_pair != api::TradePair::HTXUSDT {
-                                window.trade_pair = api::TradePair::HTXUSDT;
-                                window
-                                    .sender
-                                    .blocking_send(api::TradePair::HTXUSDT)
-                                    .unwrap();
-                            }
-                        }
-                        Self::COMAMND_EXIT => {
+                    }
+                    match params{
+                        x if x == COMMAND::EXIT as usize => {
                             std::process::exit(0);
+                        },
+                        x if x == COMMAND::FONT_WHITE as usize => {
+                            font_color = Self::make_argb(255, 255, 255, 255);
+                        },
+                        x if x == COMMAND::FONT_BLACK as usize => {
+                            font_color = Self::make_argb(255, 0, 0, 0);
                         }
-                        _ => {}
+                        _ =>{}
                     }
                     LRESULT(0)
                 }

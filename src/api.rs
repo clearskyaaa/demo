@@ -303,7 +303,9 @@ async fn receive_from_ui(
             if *last_trade_pair == new_trade_pair {
                 continue;
             }
-            if new_trade_pair != TradePair::HTXUSDT{
+            let new_api = TRADE_INFO.get(&new_trade_pair).unwrap().api.clone();
+            let old_api = TRADE_INFO.get(&last_trade_pair).unwrap().api.clone();
+            if new_api == old_api{
                 unsubscribe(&last_trade_pair, tx.clone());
                 subscribe(&new_trade_pair, tx.clone());
                 *last_trade_pair = new_trade_pair;

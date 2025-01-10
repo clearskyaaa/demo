@@ -75,6 +75,8 @@ pub enum TradePair {
     BTCUSDT,
     ETHUSDT,
     SOLUSDT,
+    PEPEUSDT,
+    DOGEUSDT,
     HTXUSDT
 }
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -91,7 +93,7 @@ lazy_static! {
             TradePair::BTCUSDT,
             TradePairInfo {
                 ws_name: "market.BTC-USDT.detail".to_string(),
-                show_name: "BTC/USDT".to_string(),
+                show_name: "BTC永续".to_string(),
                 pair_name: "market.BTC-USDT.detail".to_string(),
                 api:"wss://api.hbdm.com/linear-swap-ws".to_string()
             }
@@ -100,7 +102,7 @@ lazy_static! {
             TradePair::ETHUSDT,
             TradePairInfo {
                 ws_name: "market.ETH-USDT.detail".to_string(),
-                show_name: "ETH/USDT".to_string(),
+                show_name: "ETH永续".to_string(),
                 pair_name: "market.ETH-USDT.detail".to_string(),
                 api:"wss://api.hbdm.com/linear-swap-ws".to_string()
             }
@@ -109,8 +111,26 @@ lazy_static! {
             TradePair::SOLUSDT,
             TradePairInfo {
                 ws_name: "market.SOL-USDT.detail".to_string(),
-                show_name: "SOL/USDT".to_string(),
+                show_name: "SOL永续".to_string(),
                 pair_name: "market.SOL-USDT.detail".to_string(),
+                api:"wss://api.hbdm.com/linear-swap-ws".to_string()
+            }
+        ),
+        (
+            TradePair::PEPEUSDT,
+            TradePairInfo {
+                ws_name: "market.PEPE-USDT.detail".to_string(),
+                show_name: "PEPE永续".to_string(),
+                pair_name: "market.PEPE-USDT.detail".to_string(),
+                api:"wss://api.hbdm.com/linear-swap-ws".to_string()
+            }
+        ),
+        (
+            TradePair::DOGEUSDT,
+            TradePairInfo {
+                ws_name: "market.DOGE-USDT.detail".to_string(),
+                show_name: "DOGE永续".to_string(),
+                pair_name: "market.DOGE-USDT.detail".to_string(),
                 api:"wss://api.hbdm.com/linear-swap-ws".to_string()
             }
         ),
@@ -118,7 +138,7 @@ lazy_static! {
             TradePair::HTXUSDT,
             TradePairInfo {
                 ws_name: "market.htxusdt.detail".to_string(),
-                show_name: "HTX/USDT".to_string(),
+                show_name: "HTX现货".to_string(),
                 pair_name: "market.htxusdt.detail".to_string(),
                 api:"wss://api.huobi.pro/ws".to_string()
             }

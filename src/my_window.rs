@@ -47,9 +47,11 @@ enum COMMAND{
     BTCUSDT = 1000,
     ETHUSDT = 1001,
     SOLUSDT = 1002,
-    HTXUSDT = 1003,
-    FONT_WHITE = 1004,
-    FONT_BLACK = 1005,
+    PEPEUSDT = 1003,
+    DOGEUSDT = 1004,
+    HTXUSDT = 1005,
+    FONT_WHITE = 1101,
+    FONT_BLACK = 1102,
     EXIT = 9000,
 }
 static mut font_color:u32 = Window::make_argb(255, 255, 255, 255);
@@ -187,7 +189,7 @@ impl Window {
             Height: window.height as f32 / 2.,
         };
         let content_str;
-        if price.tag_price < 0.01{
+        if price.tag_price < 1.0{
             content_str = format!("{:E}", price.tag_price);
         }else{
             content_str = format!("{:.1}", price.tag_price);
